@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	listerv1 "k8s.io/client-go/listers/core/v1"
 	k8stesting "k8s.io/client-go/testing"
@@ -25,6 +26,7 @@ func newLauncherPod(name, namespace, vmiName string, useNewLabel bool) *v1.Pod {
 		Annotations: map[string]string{
 			kubevirtv1.DomainAnnotation: vmiName,
 		},
+		Status: v1.PodStatus{Phase: v1.PodPending},
 	}
 	if useNewLabel {
 		pod.Labels[kubevirtv1.VirtualMachineInstanceIDLabel] = vmiName
@@ -35,6 +37,15 @@ func newLauncherPod(name, namespace, vmiName string, useNewLabel bool) *v1.Pod {
 
 func TestIsVMLauncherPodAlive(t *testing.T) {
 	t.Parallel()
+	completedPod := newLauncherPod("virt-launcher-test-vm-completed", "default", "test-vm", true)
+	completedPod.Status.Phase = v1.PodSucceeded
+	failedPod := newLauncherPod("virt-launcher-test-vm-failed", "default", "test-vm", true)
+	failedPod.Status.Phase = v1.PodFailed
+	deletingPod := newLauncherPod("virt-launcher-test-vm-deleting", "default", "test-vm", true)
+	deletionTimestamp := metav1.Now()
+	deletingPod.DeletionTimestamp = &deletionTimestamp
+	runningPod := newLauncherPod("virt-launcher-test-vm-running", "default", "test-vm", true)
+	runningPod.Status.Phase = v1.PodRunning
 
 	tests := []struct {
 		name      string
@@ -63,6 +74,37 @@ func TestIsVMLauncherPodAlive(t *testing.T) {
 			name: "found by deprecated label only (old KubeVirt)",
 			pods: []*v1.Pod{
 				newLauncherPod("virt-launcher-test-vm-abc", "default", "test-vm", false),
+			},
+			vmiName:   "test-vm",
+			namespace: "default",
+			expected:  true,
+		},
+		{
+			name:      "completed pod is not alive",
+			pods:      []*v1.Pod{completedPod},
+			vmiName:   "test-vm",
+			namespace: "default",
+			expected:  false,
+		},
+		{
+			name:      "failed pod is not alive",
+			pods:      []*v1.Pod{failedPod},
+			vmiName:   "test-vm",
+			namespace: "default",
+			expected:  false,
+		},
+		{
+			name:      "deleting pod is not alive",
+			pods:      []*v1.Pod{deletingPod},
+			vmiName:   "test-vm",
+			namespace: "default",
+			expected:  false,
+		},
+		{
+			name: "running target is alive with completed source",
+			pods: []*v1.Pod{
+				completedPod,
+				runningPod,
 			},
 			vmiName:   "test-vm",
 			namespace: "default",

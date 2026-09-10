@@ -875,7 +875,11 @@ func (c *Controller) processNextUpdatePodWorkItem() bool {
 	return true
 }
 
-// isVMLauncherPodAlive checks whether any KubeVirt launcher pod exists for the given VMI name.
+func isVMLauncherPodActive(pod *v1.Pod) bool {
+	return pod.DeletionTimestamp.IsZero() && pod.Status.Phase != v1.PodSucceeded && pod.Status.Phase != v1.PodFailed
+}
+
+// isVMLauncherPodAlive checks whether any active KubeVirt launcher pod exists for the given VMI name.
 // It tries multiple lookup strategies to handle different KubeVirt versions:
 //  1. VirtualMachineInstanceIDLabel (vmi.kubevirt.io/id) — unique, available in KubeVirt >= 1.7
 //  2. DeprecatedVirtualMachineNameLabel (vm.kubevirt.io/name) — may not be unique when VM hostname is set
@@ -889,7 +893,7 @@ func (c *Controller) isVMLauncherPodAlive(namespace, vmiName, iface string) bool
 			kubevirtv1.VirtualMachineInstanceIDLabel, namespace, vmiName, err)
 		return false
 	}
-	if len(launcherPods) > 0 {
+	if slices.ContainsFunc(launcherPods, isVMLauncherPodActive) {
 		klog.V(5).Infof("found %d launcher pod(s) by %s for vmi %s/%s, keeping ovs interface %s",
 			len(launcherPods), kubevirtv1.VirtualMachineInstanceIDLabel, namespace, vmiName, iface)
 		return true
@@ -903,7 +907,7 @@ func (c *Controller) isVMLauncherPodAlive(namespace, vmiName, iface string) bool
 			kubevirtv1.DeprecatedVirtualMachineNameLabel, namespace, vmiName, err)
 		return false
 	}
-	if len(launcherPods) > 0 {
+	if slices.ContainsFunc(launcherPods, isVMLauncherPodActive) {
 		klog.V(5).Infof("found %d launcher pod(s) by %s for vmi %s/%s, keeping ovs interface %s",
 			len(launcherPods), kubevirtv1.DeprecatedVirtualMachineNameLabel, namespace, vmiName, iface)
 		return true
@@ -923,7 +927,7 @@ func (c *Controller) isVMLauncherPodAlive(namespace, vmiName, iface string) bool
 		return false
 	}
 	for _, p := range candidates {
-		if p.Annotations[kubevirtv1.DomainAnnotation] == vmiName {
+		if isVMLauncherPodActive(p) && p.Annotations[kubevirtv1.DomainAnnotation] == vmiName {
 			klog.V(5).Infof("found launcher pod %s by %s annotation for vmi %s/%s, keeping ovs interface %s",
 				p.Name, kubevirtv1.DomainAnnotation, namespace, vmiName, iface)
 			return true
