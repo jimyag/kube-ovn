@@ -10,26 +10,14 @@ tag=$1
 output_dir=$2
 repo_root=$(git rev-parse --show-toplevel)
 
-if [[ ! $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+semver_identifier='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+release_tag_regex="^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-$semver_identifier(\.$semver_identifier)*)?$"
+if [[ ! $tag =~ $release_tag_regex ]]; then
   echo "invalid release tag: $tag" >&2
   exit 1
 fi
 
-repository_version=$(<"$repo_root/VERSION")
-if [[ $tag != "$repository_version" ]]; then
-  echo "release tag $tag does not match VERSION $repository_version" >&2
-  exit 1
-fi
-
 chart_version=${tag#v}
-for chart in kube-ovn kube-ovn-v2; do
-  actual_version=$(ruby -ryaml -e 'print YAML.load_file(ARGV.fetch(0)).fetch("version")' \
-    "$repo_root/charts/$chart/Chart.yaml")
-  if [[ $actual_version != "$chart_version" ]]; then
-    echo "$chart Chart.yaml version $actual_version does not match release $chart_version" >&2
-    exit 1
-  fi
-done
 
 mkdir -p "$output_dir"
 output_dir=$(cd "$output_dir" && pwd)
@@ -52,11 +40,19 @@ RUBY
 
 ruby -ryaml - "$workspace/charts" "$tag" <<'RUBY'
 charts_dir, tag = ARGV
+chart_version = tag.delete_prefix("v")
 
 def update_yaml(path)
   values = YAML.load_file(path)
   yield values
   File.write(path, YAML.dump(values))
+end
+
+for chart in %w[kube-ovn kube-ovn-v2]
+  update_yaml(File.join(charts_dir, chart, "Chart.yaml")) do |values|
+    values["version"] = chart_version
+    values["appVersion"] = chart_version
+  end
 end
 
 update_yaml(File.join(charts_dir, "kube-ovn", "values.yaml")) do |values|
