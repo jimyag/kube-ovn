@@ -127,7 +127,20 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: hack/package-release.sh "$TAG" _out/release
 
+      - name: Check existing GitHub release
+        id: release_state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish charts to GitHub Container Registry
+        if: steps.release_state.outputs.exists != 'true'
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
@@ -182,5 +195,5 @@ jobs:
           fi
 
       - name: Log out from GitHub Container Registry
-        if: always()
+        if: always() && steps.release_state.outputs.exists != 'true'
         run: helm registry logout ghcr.io

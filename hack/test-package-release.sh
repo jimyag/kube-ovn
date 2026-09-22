@@ -45,6 +45,17 @@ for target in %w[base-amd64 base-amd64-dpdk image-kube-ovn-debug image-kube-ovn-
 end
 
 release_steps = jobs.fetch("release").fetch("steps")
+release_state = release_steps.find { |step| step["id"] == "release_state" }
+raise "release state check is missing" unless release_state&.fetch("run")&.include?('gh release view "$TAG"')
+publish_charts = release_steps.find { |step| step["name"] == "Publish charts to GitHub Container Registry" }
+unless publish_charts&.fetch("if") == "steps.release_state.outputs.exists != 'true'" &&
+       release_steps.index(release_state) < release_steps.index(publish_charts)
+  raise "chart publication must skip existing releases"
+end
+logout = release_steps.find { |step| step["name"] == "Log out from GitHub Container Registry" }
+unless logout&.fetch("if") == "always() && steps.release_state.outputs.exists != 'true'"
+  raise "registry logout must skip when chart publication is skipped"
+end
 publish_release = release_steps.find { |step| step["name"] == "Create or update GitHub release" }
 raise "Create or update GitHub release step is missing" unless publish_release
 release_command = publish_release.fetch("run")
